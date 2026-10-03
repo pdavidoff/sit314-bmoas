@@ -29,9 +29,9 @@ Both implementations completed all 60,000 observations with exact identifiers an
 
 This first pair shows about 62% lower p95 latency, 24% higher completion throughput and 65% less time to finish the backlog. The revised trial used the same publication workload and a longer collection window. Both final latency and recovery calculations use stored confirmation timestamps. The original run has a gap in continuous queue and task sampling after its initial collection window. One pair provides an initial comparison, with variability still to be assessed.
 
-Repeated stepped and reconnect trials are now evaluating the original aggregation-only scaling policy against scaling across all processing stages. These trials will establish the effect of the scaling changes separately from the fixed-capacity comparison.
+The completed evaluation contains one fixed pair, two stepped pairs and one reconnect pair. These compare the original aggregation-only scaling policy with scaling across all processing stages. The supervisor omitted the second reconnect pair to preserve the cleanup window.
 
-Smoke latency describes a small functional test. The final comparison will report the offered and completed rates, p95 processing latency, errors, backlog recovery, CPU and memory, task counts and scaling timing. Resource differences will accompany performance comparisons.
+Smoke latency describes a small functional test. The retained measurements include the offered and completed rates, p95 processing latency, errors, backlog recovery, CPU and memory, task counts and scaling timing. Resource differences accompany the performance comparisons.
 
 GitHub automated checks passed for the initial implementation commit, including syntax, all 55 tests, MongoDB integration and Docker build.
 
@@ -63,4 +63,20 @@ Each run completed all 62,000 observations, including a 50,000-observation recon
 
 ![First matched reconnect comparison](figures/reconnect-comparison.png)
 
-The first pair shows about 41% lower p95 latency and 44% less time to finish the backlog. Completion throughput including drain increased by about 55%. These results include the additional processing stages that can scale in the revised design. Repeat trials remain subject to the recorded deployment deadline.
+The first pair shows about 41% lower p95 latency and 44% less time to finish the backlog. Completion throughput including drain increased by about 55%. These results include the additional processing stages that can scale in the revised design. The second reconnect pair was omitted by the deployment deadline gate.
+
+## Completed stepped repetitions
+
+Eight formal trials completed 964,000 observations in total. Each trial reconciled exact observation identifiers and ratings. The two stepped repetitions for each implementation gave the following results.
+
+| Metric | Original trial 1 | Original trial 2 | Revised trial 1 | Revised trial 2 |
+|---|---:|---:|---:|---:|
+| p95 latency (s) | 576.5 | 598.4 | 341.9 | 392.8 |
+| Completed observations/s including drain | 180.6 | 176.3 | 237.7 | 221.5 |
+| Recovery after publication (s) | 516.4 | 541.1 | 277.1 | 332.8 |
+
+![Both stepped repetitions](figures/stepped-final-comparison.png)
+
+Across these two repetitions, mean p95 fell from 587.4 to 367.3 seconds, mean completion throughput rose from 178.5 to 229.6 observations/s, and mean recovery fell from 528.8 to 305.0 seconds. These represent approximately 37%, 29% and 42% improvements respectively. The sample is small and individual results are retained to show variation. Each stepped run offered 100, 300, 1,000 and 100 observations/s for two minutes each. The mean completion rate includes the period needed to finish the backlog.
+
+The changes improve how quickly ratings become available while preserving their counts. Further delay remains under large workloads. Node-RED and validation still gain running capacity late in the stepped trial, and revised scaling consumes more processing resources. The separate revision report will examine these stage timings and resource use alongside the application outcomes.
