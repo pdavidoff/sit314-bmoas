@@ -80,3 +80,20 @@ Eight formal trials completed 964,000 observations in total. Each trial reconcil
 Across these two repetitions, mean p95 fell from 587.4 to 367.3 seconds, mean completion throughput rose from 178.5 to 229.6 observations/s, and mean recovery fell from 528.8 to 305.0 seconds. These represent approximately 37%, 29% and 42% improvements respectively. The sample is small and individual results are retained to show variation. Each stepped run offered 100, 300, 1,000 and 100 observations/s for two minutes each. The mean completion rate includes the period needed to finish the backlog.
 
 The changes improve how quickly ratings become available while preserving their counts. Further delay remains under large workloads. Node-RED and validation still gain running capacity late in the stepped trial, and revised scaling consumes more processing resources. The separate revision report will examine these stage timings and resource use alongside the application outcomes.
+
+## Validation delay and resource use
+
+The revised validator emitted a timing sample for every observation in each formal revised trial. This separates time waiting in its input queue from time spent handling the observation.
+
+| Revised workload | Observations sampled | p95 queue residence | p95 database persistence | p95 complete handler |
+|---|---:|---:|---:|---:|
+| Fixed | 60,000 | 0.258 s | 8.38 ms | 31.02 ms |
+| Stepped trial 1 | 180,000 | 81.587 s | 21.05 ms | 48.06 ms |
+| Stepped trial 2 | 180,000 | 36.818 s | 24.01 ms | 47.73 ms |
+| Reconnect | 62,000 | 19.778 s | 10.86 ms | 35.88 ms |
+
+The recorded queue delay is much greater than the time spent handling an individual observation. This supports concentrating further work on capacity becoming available earlier and on how the stages handle accumulated demand. Each percentile is calculated separately from the captured samples, so the figures should not be added together. The original image provides overall latency and queue measurements, while the new detailed handler instrumentation is available for the revised image.
+
+Across the stepped repetitions, mean provisioned processing capacity during the measured processing interval increased from 1,684 to 2,389 vCPU-seconds, about 42%. For the reconnect pair it increased from 849 to 1,289 vCPU-seconds, about 52%. These estimates integrate sampled running task counts using the configured CPU allocation. They exclude the reporting service and time outside first publication to final confirmation. The original fixed trial ended continuous collection before recovery, so its full resource comparison is unavailable.
+
+All eight formal trials have matching generated and completed identifier sets and exact ratings. Captured service logs contain no reported application error codes in these trials. Separate functional checks exercised authentication, duplicate handling, late observations and invalid messages.
