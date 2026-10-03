@@ -34,3 +34,19 @@ Repeated stepped and reconnect trials are now evaluating the original aggregatio
 Smoke latency describes a small functional test. The final comparison will report the offered and completed rates, p95 processing latency, errors, backlog recovery, CPU and memory, task counts and scaling timing. Resource differences will accompany performance comparisons.
 
 GitHub automated checks passed for the initial implementation commit, including syntax, all 55 tests, MongoDB integration and Docker build.
+
+## First matched stepped comparison
+
+Both runs completed all 180,000 observations with exact event identifiers and ratings counts.
+
+| Metric | Original scaling | Revised scaling |
+|---|---:|---:|
+| p95 processing latency | 576.5 s | 341.9 s |
+| Completion throughput including drain | 180.6 observations/s | 237.7 observations/s |
+| Last confirmation after publication ended | 516.4 s | 277.1 s |
+
+![First matched stepped comparison](figures/stepped-comparison.png)
+
+The revised configuration reduced p95 latency by about 41% and the time to finish the backlog by about 46%. Completion throughput including drain increased by about 32%. These are results from one pair. The revised design allows more capacity: sampled running task counts imply approximately 29% more provisioned processing vCPU-seconds between first publication and final confirmation, excluding reporting and time outside that interval.
+
+Aggregation first reached two running tasks about four minutes into the revised trial, compared with about six minutes in the original. Node-RED and validation gained capacity much later, around the end of publication. The remaining latency and delayed upstream scaling remain relevant limitations to evaluate in the repeated trials.
