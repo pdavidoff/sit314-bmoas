@@ -50,3 +50,17 @@ Both runs completed all 180,000 observations with exact event identifiers and ra
 The revised configuration reduced p95 latency by about 41% and the time to finish the backlog by about 46%. Completion throughput including drain increased by about 32%. These are results from one pair. The revised design allows more capacity: sampled running task counts imply approximately 29% more provisioned processing vCPU-seconds between first publication and final confirmation, excluding reporting and time outside that interval.
 
 Aggregation first reached two running tasks about four minutes into the revised trial, compared with about six minutes in the original. Node-RED and validation gained capacity much later, around the end of publication. The remaining latency and delayed upstream scaling remain relevant limitations to evaluate in the repeated trials.
+
+## First matched reconnect comparison
+
+Each run completed all 62,000 observations, including a 50,000-observation reconnect burst. Exact identifiers and ratings counts matched.
+
+| Metric | Original scaling | Revised scaling |
+|---|---:|---:|
+| p95 processing latency | 521.2 s | 305.4 s |
+| Completion throughput including drain | 102.0 observations/s | 157.6 observations/s |
+| Last confirmation after publication ended | 490.6 s | 276.0 s |
+
+![First matched reconnect comparison](figures/reconnect-comparison.png)
+
+The first pair shows about 41% lower p95 latency and 44% less time to finish the backlog. Completion throughput including drain increased by about 55%. These results include the additional processing stages that can scale in the revised design. Repeat trials remain subject to the recorded deployment deadline.
