@@ -15,6 +15,22 @@ Updated 4 October 2026, Australian local time. The matched cloud comparison is i
 
 The original fixed trial held one task per processing stage. Aggregation CPU was approximately 100%, while upstream queues remained small. The initial 720-second collection window ended before the aggregation queue drained. The original snapshot was retained and final database reconciliation confirmed all 60,000 events. Continuous queue and task sampling covers only the initial window. Database confirmation times remain available for final latency and recovery calculations.
 
-The revised fixed trial uses the same publication workload and a longer collection window. Repeated stepped and reconnect trials compare the original aggregation-only scaling policy with scaling across all processing stages. Results will be added after reconciliation and review.
+## First matched fixed-capacity comparison
+
+Both implementations completed all 60,000 observations with exact identifiers and ratings counts. Each processing stage had one task, using the same M30 database tier and workload.
+
+| Metric | Original | Revised |
+|---|---:|---:|
+| p95 processing latency | 246.0 s | 92.4 s |
+| Completion throughput including drain | 70.6 observations/s | 87.4 observations/s |
+| Last confirmation after publication ended | 250.0 s | 86.6 s |
+
+![First matched fixed-capacity comparison](figures/fixed-comparison.png)
+
+This first pair shows about 62% lower p95 latency, 24% higher completion throughput and 65% less time to finish the backlog. The revised trial used the same publication workload and a longer collection window. Both final latency and recovery calculations use stored confirmation timestamps. The original run has a gap in continuous queue and task sampling after its initial collection window. One pair provides an initial comparison, with variability still to be assessed.
+
+Repeated stepped and reconnect trials are now evaluating the original aggregation-only scaling policy against scaling across all processing stages. These trials will establish the effect of the scaling changes separately from the fixed-capacity comparison.
 
 Smoke latency describes a small functional test. The final comparison will report the offered and completed rates, p95 processing latency, errors, backlog recovery, CPU and memory, task counts and scaling timing. Resource differences will accompany performance comparisons.
+
+GitHub automated checks passed for the initial implementation commit, including syntax, all 55 tests, MongoDB integration and Docker build.
