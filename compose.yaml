@@ -1,0 +1,20 @@
+# DEVELOPMENT ONLY: no cloud credentials and no public ports.
+services:
+  mqtt:
+    image: eclipse-mosquitto:2
+    ports: ["127.0.0.1:1883:1883"]
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mqtt-data:/mosquitto/data
+  queues:
+    image: softwaremill/elasticmq-native:latest
+    ports: ["127.0.0.1:9324:9324"]
+    volumes: ["./config/elasticmq.conf:/opt/elasticmq.conf:ro"]
+  mongo:
+    image: mongo:8.0
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports: ["127.0.0.1:27017:27017"]
+    volumes: ["mongo-data:/data/db"]
+volumes:
+  mqtt-data:
+  mongo-data:

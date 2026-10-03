@@ -1,0 +1,6 @@
+{
+  "devices": 1000,
+  "interval_ms": 10000,
+  "duration_seconds": 600,
+  "burst_events": 0
+}

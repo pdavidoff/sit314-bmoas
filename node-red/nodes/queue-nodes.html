@@ -1,0 +1,8 @@
+<script type="text/javascript">
+RED.nodes.registerType('bmoas-in',{category:'BMOAS',color:'#ddd',defaults:{name:{value:''},queue:{value:'raw',required:true}},inputs:0,outputs:1,icon:'bridge.svg',label:function(){return this.name||'Receive queue';}});
+RED.nodes.registerType('bmoas-out',{category:'BMOAS',color:'#ddd',defaults:{name:{value:''},queue:{value:'checked',required:true}},inputs:1,outputs:1,icon:'bridge.svg',label:function(){return this.name||'Send queue';}});
+</script>
+<script type="text/html" data-template-name="bmoas-in"><div class="form-row"><label for="node-input-name">Name</label><input id="node-input-name"></div><div class="form-row"><label for="node-input-queue">Queue</label><input id="node-input-queue"></div></script>
+<script type="text/html" data-template-name="bmoas-out"><div class="form-row"><label for="node-input-name">Name</label><input id="node-input-name"></div><div class="form-row"><label for="node-input-queue">Queue</label><input id="node-input-queue"></div></script>
+<script type="text/html" data-help-name="bmoas-in"><p>Polls SQS. The outgoing node resolves delivery only after forwarding succeeds. Processing failures cause redelivery, subject to the queue's retry policy.</p></script>
+<script type="text/html" data-help-name="bmoas-out"><p>Forwards the payload to a named queue, then completes the input delivery. Do not remove the internal delivery callback from messages between these nodes.</p></script>

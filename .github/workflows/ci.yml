@@ -1,0 +1,30 @@
+name: BMOAS checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked dependencies
+        run: |
+          test -f package-lock.json || { echo 'Generate and commit package-lock.json before claiming a reproducible build'; exit 1; }
+          npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Start local MongoDB replica set
+        run: |
+          docker compose up -d mongo
+          for i in $(seq 1 40); do
+            docker compose exec -T mongo mongosh --quiet --eval 'db.adminCommand({ping:1})' && break || sleep 2
+          done
+          docker compose exec -T mongo mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"localhost:27017"}]})'
+          sleep 10
+      - run: npm run test:integration
+        env:
+          MONGODB_TEST_URI: mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true
+      - run: docker build -t bmoas:ci .

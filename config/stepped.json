@@ -1,0 +1,24 @@
+{
+  "devices": 10000,
+  "interval_ms": 10000,
+  "duration_seconds": 480,
+  "burst_events": 0,
+  "steps": [
+    {
+      "duration_seconds": 120,
+      "events_per_second": 100
+    },
+    {
+      "duration_seconds": 120,
+      "events_per_second": 300
+    },
+    {
+      "duration_seconds": 120,
+      "events_per_second": 1000
+    },
+    {
+      "duration_seconds": 120,
+      "events_per_second": 100
+    }
+  ]
+}

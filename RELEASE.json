@@ -1,0 +1,8 @@
+{
+  "release": "0.2.0-evaluation",
+  "status": "Tutor feedback revision, matched cloud evaluation in progress",
+  "local_automated_checks_passed": 55,
+  "cloud_smoke_completed": 200,
+  "cloud_smoke_p95_ms": 210,
+  "comparison_results": "See docs/EVALUATION.md. Evaluation is ongoing."
+}

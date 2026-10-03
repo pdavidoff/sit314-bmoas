@@ -1,0 +1,9 @@
+.git
+node_modules
+.env*
+secrets
+runs
+runtime
+evidence
+*.pem
+*.key

@@ -1,0 +1,2075 @@
+{
+ "AWSTemplateFormatVersion": "2010-09-09",
+ "Description": "BMOAS private ECS services. Initialise Atlas before starting these services.",
+ "Parameters": {
+  "FoundationStack": {
+   "Type": "String",
+   "Default": "bmoas-foundation"
+  },
+  "ImageUri": {
+   "Type": "String",
+   "Description": "Immutable ECR image tag or digest"
+  },
+  "MongoWriterSecretArn": {
+   "Type": "String"
+  },
+  "MongoReaderSecretArn": {
+   "Type": "String"
+  },
+  "ApiTokenSecretArn": {
+   "Type": "String"
+  },
+  "DatabaseName": {
+   "Type": "String",
+   "Default": "bmoas"
+  },
+  "AggregatorCpu": {
+   "Type": "String",
+   "Default": "256",
+   "AllowedValues": [
+    "256",
+    "512",
+    "1024"
+   ]
+  },
+  "AggregatorMemory": {
+   "Type": "String",
+   "Default": "512",
+   "AllowedValues": [
+    "512",
+    "1024",
+    "2048"
+   ]
+  },
+  "ResponsiveScaling": {
+   "Type": "String",
+   "Default": "true",
+   "AllowedValues": [
+    "true",
+    "false"
+   ],
+   "Description": "Enable scaling of all processing stages and faster scale-out alarms. false retains aggregation CPU scaling only."
+  },
+  "QueueBacklogThreshold": {
+   "Type": "Number",
+   "Default": 1000,
+   "MinValue": 1,
+   "Description": "Provisional visible-message threshold for adding capacity. Calibrate with matched experiments."
+  },
+  "QueueAgeThreshold": {
+   "Type": "Number",
+   "Default": 30,
+   "MinValue": 1,
+   "Description": "Oldest visible message age in seconds before urgent scale-out."
+  }
+ },
+ "Resources": {
+  "NodeRedLog": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": {
+     "Fn::Sub": "${FoundationStack}/nodered"
+    },
+    "RetentionInDays": 14
+   }
+  },
+  "NodeRedExecutionRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "execution",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:GetAuthorizationToken"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+         ],
+         "Resource": {
+          "Fn::ImportValue": {
+           "Fn::Sub": "${FoundationStack}-RepositoryArn"
+          }
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "NodeRedLog",
+           "Arn"
+          ]
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "NodeRedTaskRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "application",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:ChangeMessageVisibility",
+          "sqs:GetQueueAttributes"
+         ],
+         "Resource": [
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-RawQueueArn"
+           }
+          }
+         ]
+        },
+        {
+         "Effect": "Allow",
+         "Action": "sqs:SendMessage",
+         "Resource": [
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-CheckedQueueArn"
+           }
+          },
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-RejectedQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "NodeRedTask": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "Family": {
+     "Fn::Sub": "${FoundationStack}-nodered"
+    },
+    "Cpu": "512",
+    "Memory": "1024",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "NetworkMode": "awsvpc",
+    "RuntimePlatform": {
+     "CpuArchitecture": "X86_64",
+     "OperatingSystemFamily": "LINUX"
+    },
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "NodeRedExecutionRole",
+      "Arn"
+     ]
+    },
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "NodeRedTaskRole",
+      "Arn"
+     ]
+    },
+    "ContainerDefinitions": [
+     {
+      "Name": "nodered",
+      "Image": {
+       "Ref": "ImageUri"
+      },
+      "Essential": true,
+      "Command": [
+       "node",
+       "src/services/node-red.js"
+      ],
+      "StopTimeout": 120,
+      "Environment": [
+       {
+        "Name": "NODE_ENV",
+        "Value": "production"
+       },
+       {
+        "Name": "AWS_REGION",
+        "Value": {
+         "Ref": "AWS::Region"
+        }
+       },
+       {
+        "Name": "MONGODB_DATABASE",
+        "Value": {
+         "Ref": "DatabaseName"
+        }
+       },
+       {
+        "Name": "BIND_HOST",
+        "Value": "0.0.0.0"
+       },
+       {
+        "Name": "POLLERS",
+        "Value": "2"
+       },
+       {
+        "Name": "WINDOW_SECONDS",
+        "Value": "60"
+       },
+       {
+        "Name": "QUEUE_RAW_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-RawQueueUrl"
+         }
+        }
+       },
+       {
+        "Name": "QUEUE_CHECKED_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-CheckedQueueUrl"
+         }
+        }
+       },
+       {
+        "Name": "QUEUE_REJECTED_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-RejectedQueueUrl"
+         }
+        }
+       }
+      ],
+      "Secrets": [],
+      "LinuxParameters": {
+       "InitProcessEnabled": true
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "NodeRedLog"
+        },
+        "awslogs-region": {
+         "Ref": "AWS::Region"
+        },
+        "awslogs-stream-prefix": "service"
+       }
+      }
+     }
+    ]
+   }
+  },
+  "NodeRedService": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Fn::ImportValue": {
+      "Fn::Sub": "${FoundationStack}-ClusterName"
+     }
+    },
+    "ServiceName": {
+     "Fn::Sub": "${FoundationStack}-nodered"
+    },
+    "TaskDefinition": {
+     "Ref": "NodeRedTask"
+    },
+    "DesiredCount": 1,
+    "LaunchType": "FARGATE",
+    "EnableExecuteCommand": true,
+    "DeploymentConfiguration": {
+     "DeploymentCircuitBreaker": {
+      "Enable": true,
+      "Rollback": true
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 100
+    },
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "Subnets": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetA"
+        }
+       },
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetB"
+        }
+       }
+      ],
+      "SecurityGroups": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ServiceSecurityGroup"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  "ValidatorLog": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": {
+     "Fn::Sub": "${FoundationStack}/validator"
+    },
+    "RetentionInDays": 14
+   }
+  },
+  "ValidatorExecutionRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "execution",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:GetAuthorizationToken"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+         ],
+         "Resource": {
+          "Fn::ImportValue": {
+           "Fn::Sub": "${FoundationStack}-RepositoryArn"
+          }
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "ValidatorLog",
+           "Arn"
+          ]
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": "secretsmanager:GetSecretValue",
+         "Resource": [
+          {
+           "Ref": "MongoWriterSecretArn"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "ValidatorTaskRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "application",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:ChangeMessageVisibility",
+          "sqs:GetQueueAttributes"
+         ],
+         "Resource": [
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-CheckedQueueArn"
+           }
+          }
+         ]
+        },
+        {
+         "Effect": "Allow",
+         "Action": "sqs:SendMessage",
+         "Resource": [
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-AggregateQueueArn"
+           }
+          },
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-RejectedQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "ValidatorTask": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "Family": {
+     "Fn::Sub": "${FoundationStack}-validator"
+    },
+    "Cpu": "512",
+    "Memory": "1024",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "NetworkMode": "awsvpc",
+    "RuntimePlatform": {
+     "CpuArchitecture": "X86_64",
+     "OperatingSystemFamily": "LINUX"
+    },
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "ValidatorExecutionRole",
+      "Arn"
+     ]
+    },
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "ValidatorTaskRole",
+      "Arn"
+     ]
+    },
+    "ContainerDefinitions": [
+     {
+      "Name": "validator",
+      "Image": {
+       "Ref": "ImageUri"
+      },
+      "Essential": true,
+      "Command": [
+       "node",
+       "src/services/validator.js"
+      ],
+      "StopTimeout": 120,
+      "Environment": [
+       {
+        "Name": "NODE_ENV",
+        "Value": "production"
+       },
+       {
+        "Name": "AWS_REGION",
+        "Value": {
+         "Ref": "AWS::Region"
+        }
+       },
+       {
+        "Name": "MONGODB_DATABASE",
+        "Value": {
+         "Ref": "DatabaseName"
+        }
+       },
+       {
+        "Name": "BIND_HOST",
+        "Value": "0.0.0.0"
+       },
+       {
+        "Name": "POLLERS",
+        "Value": "2"
+       },
+       {
+        "Name": "WINDOW_SECONDS",
+        "Value": "60"
+       },
+       {
+        "Name": "QUEUE_CHECKED_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-CheckedQueueUrl"
+         }
+        }
+       },
+       {
+        "Name": "QUEUE_AGGREGATE_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-AggregateQueueUrl"
+         }
+        }
+       },
+       {
+        "Name": "QUEUE_REJECTED_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-RejectedQueueUrl"
+         }
+        }
+       }
+      ],
+      "Secrets": [
+       {
+        "Name": "MONGODB_URI",
+        "ValueFrom": {
+         "Ref": "MongoWriterSecretArn"
+        }
+       }
+      ],
+      "LinuxParameters": {
+       "InitProcessEnabled": true
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "ValidatorLog"
+        },
+        "awslogs-region": {
+         "Ref": "AWS::Region"
+        },
+        "awslogs-stream-prefix": "service"
+       }
+      }
+     }
+    ]
+   }
+  },
+  "ValidatorService": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Fn::ImportValue": {
+      "Fn::Sub": "${FoundationStack}-ClusterName"
+     }
+    },
+    "ServiceName": {
+     "Fn::Sub": "${FoundationStack}-validator"
+    },
+    "TaskDefinition": {
+     "Ref": "ValidatorTask"
+    },
+    "DesiredCount": 1,
+    "LaunchType": "FARGATE",
+    "EnableExecuteCommand": true,
+    "DeploymentConfiguration": {
+     "DeploymentCircuitBreaker": {
+      "Enable": true,
+      "Rollback": true
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 100
+    },
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "Subnets": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetA"
+        }
+       },
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetB"
+        }
+       }
+      ],
+      "SecurityGroups": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ServiceSecurityGroup"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  "AggregatorLog": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": {
+     "Fn::Sub": "${FoundationStack}/aggregator"
+    },
+    "RetentionInDays": 14
+   }
+  },
+  "AggregatorExecutionRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "execution",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:GetAuthorizationToken"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+         ],
+         "Resource": {
+          "Fn::ImportValue": {
+           "Fn::Sub": "${FoundationStack}-RepositoryArn"
+          }
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "AggregatorLog",
+           "Arn"
+          ]
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": "secretsmanager:GetSecretValue",
+         "Resource": [
+          {
+           "Ref": "MongoWriterSecretArn"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "AggregatorTaskRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "application",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:ChangeMessageVisibility",
+          "sqs:GetQueueAttributes"
+         ],
+         "Resource": [
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-AggregateQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "AggregatorTask": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "Family": {
+     "Fn::Sub": "${FoundationStack}-aggregator"
+    },
+    "Cpu": {
+     "Ref": "AggregatorCpu"
+    },
+    "Memory": {
+     "Ref": "AggregatorMemory"
+    },
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "NetworkMode": "awsvpc",
+    "RuntimePlatform": {
+     "CpuArchitecture": "X86_64",
+     "OperatingSystemFamily": "LINUX"
+    },
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "AggregatorExecutionRole",
+      "Arn"
+     ]
+    },
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "AggregatorTaskRole",
+      "Arn"
+     ]
+    },
+    "ContainerDefinitions": [
+     {
+      "Name": "aggregator",
+      "Image": {
+       "Ref": "ImageUri"
+      },
+      "Essential": true,
+      "Command": [
+       "node",
+       "src/services/aggregator.js"
+      ],
+      "StopTimeout": 120,
+      "Environment": [
+       {
+        "Name": "NODE_ENV",
+        "Value": "production"
+       },
+       {
+        "Name": "AWS_REGION",
+        "Value": {
+         "Ref": "AWS::Region"
+        }
+       },
+       {
+        "Name": "MONGODB_DATABASE",
+        "Value": {
+         "Ref": "DatabaseName"
+        }
+       },
+       {
+        "Name": "BIND_HOST",
+        "Value": "0.0.0.0"
+       },
+       {
+        "Name": "POLLERS",
+        "Value": "2"
+       },
+       {
+        "Name": "WINDOW_SECONDS",
+        "Value": "60"
+       },
+       {
+        "Name": "QUEUE_AGGREGATE_URL",
+        "Value": {
+         "Fn::ImportValue": {
+          "Fn::Sub": "${FoundationStack}-AggregateQueueUrl"
+         }
+        }
+       }
+      ],
+      "Secrets": [
+       {
+        "Name": "MONGODB_URI",
+        "ValueFrom": {
+         "Ref": "MongoWriterSecretArn"
+        }
+       }
+      ],
+      "LinuxParameters": {
+       "InitProcessEnabled": true
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "AggregatorLog"
+        },
+        "awslogs-region": {
+         "Ref": "AWS::Region"
+        },
+        "awslogs-stream-prefix": "service"
+       }
+      }
+     }
+    ]
+   }
+  },
+  "AggregatorService": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Fn::ImportValue": {
+      "Fn::Sub": "${FoundationStack}-ClusterName"
+     }
+    },
+    "ServiceName": {
+     "Fn::Sub": "${FoundationStack}-aggregator"
+    },
+    "TaskDefinition": {
+     "Ref": "AggregatorTask"
+    },
+    "DesiredCount": 1,
+    "LaunchType": "FARGATE",
+    "EnableExecuteCommand": true,
+    "DeploymentConfiguration": {
+     "DeploymentCircuitBreaker": {
+      "Enable": true,
+      "Rollback": true
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 100
+    },
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "Subnets": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetA"
+        }
+       },
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetB"
+        }
+       }
+      ],
+      "SecurityGroups": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ServiceSecurityGroup"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  "ReporterLog": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "LogGroupName": {
+     "Fn::Sub": "${FoundationStack}/reporter"
+    },
+    "RetentionInDays": 14
+   }
+  },
+  "ReporterExecutionRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "execution",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:GetAuthorizationToken"
+         ],
+         "Resource": "*"
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage"
+         ],
+         "Resource": {
+          "Fn::ImportValue": {
+           "Fn::Sub": "${FoundationStack}-RepositoryArn"
+          }
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "ReporterLog",
+           "Arn"
+          ]
+         }
+        },
+        {
+         "Effect": "Allow",
+         "Action": "secretsmanager:GetSecretValue",
+         "Resource": [
+          {
+           "Ref": "MongoReaderSecretArn"
+          },
+          {
+           "Ref": "ApiTokenSecretArn"
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "ReporterTaskRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole",
+       "Condition": {
+        "StringEquals": {
+         "aws:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         }
+        },
+        "ArnLike": {
+         "aws:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:*"
+         }
+        }
+       }
+      }
+     ]
+    },
+    "Policies": [
+     {
+      "PolicyName": "application",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Effect": "Allow",
+         "Action": [
+          "ssmmessages:CreateControlChannel",
+          "ssmmessages:CreateDataChannel",
+          "ssmmessages:OpenControlChannel",
+          "ssmmessages:OpenDataChannel"
+         ],
+         "Resource": "*"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "ReporterTask": {
+   "Type": "AWS::ECS::TaskDefinition",
+   "Properties": {
+    "Family": {
+     "Fn::Sub": "${FoundationStack}-reporter"
+    },
+    "Cpu": "512",
+    "Memory": "1024",
+    "RequiresCompatibilities": [
+     "FARGATE"
+    ],
+    "NetworkMode": "awsvpc",
+    "RuntimePlatform": {
+     "CpuArchitecture": "X86_64",
+     "OperatingSystemFamily": "LINUX"
+    },
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "ReporterExecutionRole",
+      "Arn"
+     ]
+    },
+    "TaskRoleArn": {
+     "Fn::GetAtt": [
+      "ReporterTaskRole",
+      "Arn"
+     ]
+    },
+    "ContainerDefinitions": [
+     {
+      "Name": "reporter",
+      "Image": {
+       "Ref": "ImageUri"
+      },
+      "Essential": true,
+      "Command": [
+       "node",
+       "src/services/api.js"
+      ],
+      "StopTimeout": 120,
+      "Environment": [
+       {
+        "Name": "NODE_ENV",
+        "Value": "production"
+       },
+       {
+        "Name": "AWS_REGION",
+        "Value": {
+         "Ref": "AWS::Region"
+        }
+       },
+       {
+        "Name": "MONGODB_DATABASE",
+        "Value": {
+         "Ref": "DatabaseName"
+        }
+       },
+       {
+        "Name": "BIND_HOST",
+        "Value": "0.0.0.0"
+       },
+       {
+        "Name": "POLLERS",
+        "Value": "2"
+       },
+       {
+        "Name": "WINDOW_SECONDS",
+        "Value": "60"
+       }
+      ],
+      "Secrets": [
+       {
+        "Name": "MONGODB_URI",
+        "ValueFrom": {
+         "Ref": "MongoReaderSecretArn"
+        }
+       },
+       {
+        "Name": "API_TOKEN",
+        "ValueFrom": {
+         "Ref": "ApiTokenSecretArn"
+        }
+       }
+      ],
+      "LinuxParameters": {
+       "InitProcessEnabled": true
+      },
+      "LogConfiguration": {
+       "LogDriver": "awslogs",
+       "Options": {
+        "awslogs-group": {
+         "Ref": "ReporterLog"
+        },
+        "awslogs-region": {
+         "Ref": "AWS::Region"
+        },
+        "awslogs-stream-prefix": "service"
+       }
+      }
+     }
+    ]
+   }
+  },
+  "ReporterService": {
+   "Type": "AWS::ECS::Service",
+   "Properties": {
+    "Cluster": {
+     "Fn::ImportValue": {
+      "Fn::Sub": "${FoundationStack}-ClusterName"
+     }
+    },
+    "ServiceName": {
+     "Fn::Sub": "${FoundationStack}-reporter"
+    },
+    "TaskDefinition": {
+     "Ref": "ReporterTask"
+    },
+    "DesiredCount": 1,
+    "LaunchType": "FARGATE",
+    "EnableExecuteCommand": true,
+    "DeploymentConfiguration": {
+     "DeploymentCircuitBreaker": {
+      "Enable": true,
+      "Rollback": true
+     },
+     "MaximumPercent": 200,
+     "MinimumHealthyPercent": 100
+    },
+    "NetworkConfiguration": {
+     "AwsvpcConfiguration": {
+      "AssignPublicIp": "DISABLED",
+      "Subnets": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetA"
+        }
+       },
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-PrivateSubnetB"
+        }
+       }
+      ],
+      "SecurityGroups": [
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ServiceSecurityGroup"
+        }
+       }
+      ]
+     }
+    }
+   }
+  },
+  "AggregationTarget": {
+   "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "Properties": {
+    "MaxCapacity": 4,
+    "MinCapacity": 1,
+    "ResourceId": {
+     "Fn::Join": [
+      "",
+      [
+       "service/",
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ClusterName"
+        }
+       },
+       "/",
+       {
+        "Fn::GetAtt": [
+         "AggregatorService",
+         "Name"
+        ]
+       }
+      ]
+     ]
+    },
+    "ScalableDimension": "ecs:service:DesiredCount",
+    "ServiceNamespace": "ecs"
+   }
+  },
+  "CpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Properties": {
+    "PolicyName": "bmoas-aggregation-cpu60",
+    "PolicyType": "TargetTrackingScaling",
+    "ScalingTargetId": {
+     "Ref": "AggregationTarget"
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+     "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+     },
+     "TargetValue": 60.0,
+     "ScaleOutCooldown": 60,
+     "ScaleInCooldown": 180
+    }
+   }
+  },
+  "NodeRedTarget": {
+   "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "Properties": {
+    "MaxCapacity": 4,
+    "MinCapacity": 1,
+    "ResourceId": {
+     "Fn::Join": [
+      "",
+      [
+       "service/",
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ClusterName"
+        }
+       },
+       "/",
+       {
+        "Fn::GetAtt": [
+         "NodeRedService",
+         "Name"
+        ]
+       }
+      ]
+     ]
+    },
+    "ScalableDimension": "ecs:service:DesiredCount",
+    "ServiceNamespace": "ecs"
+   },
+   "Condition": "Responsive"
+  },
+  "NodeRedCpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-NodeRed-cpu60"
+    },
+    "PolicyType": "TargetTrackingScaling",
+    "ScalingTargetId": {
+     "Ref": "NodeRedTarget"
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+     "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+     },
+     "TargetValue": 60.0,
+     "ScaleOutCooldown": 60,
+     "ScaleInCooldown": 180
+    }
+   },
+   "Condition": "Responsive"
+  },
+  "NodeRedFastCpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-NodeRed-FastCpu"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "NodeRedTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ChangeInCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 1
+      }
+     ]
+    }
+   }
+  },
+  "NodeRedBacklogPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-NodeRed-Backlog"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "NodeRedTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ExactCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 4
+      }
+     ]
+    }
+   }
+  },
+  "NodeRedCpuAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/ECS",
+    "MetricName": "CPUUtilization",
+    "Dimensions": [
+     {
+      "Name": "ClusterName",
+      "Value": {
+       "Fn::ImportValue": {
+        "Fn::Sub": "${FoundationStack}-ClusterName"
+       }
+      }
+     },
+     {
+      "Name": "ServiceName",
+      "Value": {
+       "Fn::GetAtt": [
+        "NodeRedService",
+        "Name"
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": 60,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "NodeRedFastCpuPolicy"
+     }
+    ]
+   }
+  },
+  "NodeRedDepthAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateNumberOfMessagesVisible",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-RawQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueBacklogThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "NodeRedBacklogPolicy"
+     }
+    ]
+   }
+  },
+  "NodeRedAgeAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateAgeOfOldestMessage",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-RawQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueAgeThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "NodeRedBacklogPolicy"
+     }
+    ]
+   }
+  },
+  "ValidatorTarget": {
+   "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
+   "Properties": {
+    "MaxCapacity": 4,
+    "MinCapacity": 1,
+    "ResourceId": {
+     "Fn::Join": [
+      "",
+      [
+       "service/",
+       {
+        "Fn::ImportValue": {
+         "Fn::Sub": "${FoundationStack}-ClusterName"
+        }
+       },
+       "/",
+       {
+        "Fn::GetAtt": [
+         "ValidatorService",
+         "Name"
+        ]
+       }
+      ]
+     ]
+    },
+    "ScalableDimension": "ecs:service:DesiredCount",
+    "ServiceNamespace": "ecs"
+   },
+   "Condition": "Responsive"
+  },
+  "ValidatorCpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-Validator-cpu60"
+    },
+    "PolicyType": "TargetTrackingScaling",
+    "ScalingTargetId": {
+     "Ref": "ValidatorTarget"
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+     "PredefinedMetricSpecification": {
+      "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+     },
+     "TargetValue": 60.0,
+     "ScaleOutCooldown": 60,
+     "ScaleInCooldown": 180
+    }
+   },
+   "Condition": "Responsive"
+  },
+  "ValidatorFastCpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-Validator-FastCpu"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "ValidatorTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ChangeInCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 1
+      }
+     ]
+    }
+   }
+  },
+  "ValidatorBacklogPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-Validator-Backlog"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "ValidatorTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ExactCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 4
+      }
+     ]
+    }
+   }
+  },
+  "ValidatorCpuAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/ECS",
+    "MetricName": "CPUUtilization",
+    "Dimensions": [
+     {
+      "Name": "ClusterName",
+      "Value": {
+       "Fn::ImportValue": {
+        "Fn::Sub": "${FoundationStack}-ClusterName"
+       }
+      }
+     },
+     {
+      "Name": "ServiceName",
+      "Value": {
+       "Fn::GetAtt": [
+        "ValidatorService",
+        "Name"
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": 60,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "ValidatorFastCpuPolicy"
+     }
+    ]
+   }
+  },
+  "ValidatorDepthAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateNumberOfMessagesVisible",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-CheckedQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueBacklogThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "ValidatorBacklogPolicy"
+     }
+    ]
+   }
+  },
+  "ValidatorAgeAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateAgeOfOldestMessage",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-CheckedQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueAgeThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "ValidatorBacklogPolicy"
+     }
+    ]
+   }
+  },
+  "AggregatorFastCpuPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-Aggregator-FastCpu"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "AggregationTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ChangeInCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 1
+      }
+     ]
+    }
+   }
+  },
+  "AggregatorBacklogPolicy": {
+   "Type": "AWS::ApplicationAutoScaling::ScalingPolicy",
+   "Condition": "Responsive",
+   "Properties": {
+    "PolicyName": {
+     "Fn::Sub": "${AWS::StackName}-Aggregator-Backlog"
+    },
+    "PolicyType": "StepScaling",
+    "ScalingTargetId": {
+     "Ref": "AggregationTarget"
+    },
+    "StepScalingPolicyConfiguration": {
+     "AdjustmentType": "ExactCapacity",
+     "Cooldown": 60,
+     "MetricAggregationType": "Maximum",
+     "StepAdjustments": [
+      {
+       "MetricIntervalLowerBound": 0,
+       "ScalingAdjustment": 4
+      }
+     ]
+    }
+   }
+  },
+  "AggregatorCpuAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/ECS",
+    "MetricName": "CPUUtilization",
+    "Dimensions": [
+     {
+      "Name": "ClusterName",
+      "Value": {
+       "Fn::ImportValue": {
+        "Fn::Sub": "${FoundationStack}-ClusterName"
+       }
+      }
+     },
+     {
+      "Name": "ServiceName",
+      "Value": {
+       "Fn::GetAtt": [
+        "AggregatorService",
+        "Name"
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": 60,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AggregatorFastCpuPolicy"
+     }
+    ]
+   }
+  },
+  "AggregatorDepthAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateNumberOfMessagesVisible",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-AggregateQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueBacklogThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AggregatorBacklogPolicy"
+     }
+    ]
+   }
+  },
+  "AggregatorAgeAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Condition": "Responsive",
+   "Properties": {
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateAgeOfOldestMessage",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::Select": [
+        5,
+        {
+         "Fn::Split": [
+          ":",
+          {
+           "Fn::ImportValue": {
+            "Fn::Sub": "${FoundationStack}-AggregateQueueArn"
+           }
+          }
+         ]
+        }
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 1,
+    "DatapointsToAlarm": 1,
+    "Threshold": {
+     "Ref": "QueueAgeThreshold"
+    },
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AggregatorBacklogPolicy"
+     }
+    ]
+   }
+  }
+ },
+ "Outputs": {
+  "NodeRedService": {
+   "Value": {
+    "Fn::GetAtt": [
+     "NodeRedService",
+     "Name"
+    ]
+   }
+  },
+  "NodeRedTaskDefinition": {
+   "Value": {
+    "Ref": "NodeRedTask"
+   }
+  },
+  "ValidatorService": {
+   "Value": {
+    "Fn::GetAtt": [
+     "ValidatorService",
+     "Name"
+    ]
+   }
+  },
+  "ValidatorTaskDefinition": {
+   "Value": {
+    "Ref": "ValidatorTask"
+   }
+  },
+  "AggregatorService": {
+   "Value": {
+    "Fn::GetAtt": [
+     "AggregatorService",
+     "Name"
+    ]
+   }
+  },
+  "AggregatorTaskDefinition": {
+   "Value": {
+    "Ref": "AggregatorTask"
+   }
+  },
+  "ReporterService": {
+   "Value": {
+    "Fn::GetAtt": [
+     "ReporterService",
+     "Name"
+    ]
+   }
+  },
+  "ReporterTaskDefinition": {
+   "Value": {
+    "Ref": "ReporterTask"
+   }
+  }
+ },
+ "Conditions": {
+  "Responsive": {
+   "Fn::Equals": [
+    {
+     "Ref": "ResponsiveScaling"
+    },
+    "true"
+   ]
+  }
+ }
+}

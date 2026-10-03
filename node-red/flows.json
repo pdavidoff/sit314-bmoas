@@ -1,0 +1,112 @@
+[
+  {
+    "id": "flow-bmoas",
+    "type": "tab",
+    "label": "BMOAS | MQTT observations to validation",
+    "disabled": false,
+    "info": "AWS IoT Core supplies the raw queue. Delete only after forwarding. Local bridge emulates the rule, not AWS."
+  },
+  {
+    "id": "raw",
+    "type": "bmoas-in",
+    "z": "flow-bmoas",
+    "name": "Receive from IoT queue",
+    "queue": "raw",
+    "x": 160,
+    "y": 120,
+    "wires": [
+      [
+        "decode"
+      ]
+    ]
+  },
+  {
+    "id": "decode",
+    "type": "function",
+    "z": "flow-bmoas",
+    "name": "Decode observation",
+    "func": "const domain = global.get('bmoasDomain');\ntry { msg.payload = domain.decodeEnvelope(msg.payload); return [msg,null]; }\ncatch(e) { msg.payload = {stage:'node-red',reason:e.code||'invalid_json'}; return [null,msg]; }",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 120,
+    "wires": [
+      [
+        "check"
+      ],
+      [
+        "reject"
+      ]
+    ]
+  },
+  {
+    "id": "check",
+    "type": "function",
+    "z": "flow-bmoas",
+    "name": "Check basic structure",
+    "func": "const domain = global.get('bmoasDomain');\ntry { domain.basicChecks(msg.payload); return [msg,null]; }\ncatch(e) { msg.payload = {stage:'node-red',reason:e.code,event_id:msg.payload.event?.event_id,run_id:msg.payload.event?.run_id}; return [null,msg]; }",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 640,
+    "y": 100,
+    "wires": [
+      [
+        "checked"
+      ],
+      [
+        "reject"
+      ]
+    ]
+  },
+  {
+    "id": "checked",
+    "type": "bmoas-out",
+    "z": "flow-bmoas",
+    "name": "Forward to validation queue",
+    "queue": "checked",
+    "x": 950,
+    "y": 100,
+    "wires": [
+      [
+        "diagnostic"
+      ]
+    ]
+  },
+  {
+    "id": "reject",
+    "type": "bmoas-out",
+    "z": "flow-bmoas",
+    "name": "Quarantine invalid input",
+    "queue": "rejected",
+    "x": 700,
+    "y": 220,
+    "wires": [
+      [
+        "diagnostic"
+      ]
+    ]
+  },
+  {
+    "id": "diagnostic",
+    "type": "debug",
+    "z": "flow-bmoas",
+    "name": "Forwarding result (no raw data)",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 1020,
+    "y": 220,
+    "wires": []
+  }
+]
