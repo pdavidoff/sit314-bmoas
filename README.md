@@ -96,4 +96,4 @@ Configuration examples contain placeholders. Passwords, tokens, certificates, pr
 
 This repository supports the project report and the separate evaluation of changes made following tutor feedback. OpenAI ChatGPT and Codex assisted with generating and revising the code, configuration, tests and documentation, and with deployment support and analysis. The student remains responsible for reviewing the work, interpreting the results and explaining the architectural decisions.
 
-The repository is private. A tutor needs a GitHub collaborator invitation and must accept it before accessing the link.
+The repository is public for assessment access. No GitHub invitation is required. The report copy published here omits the student number from its cover.
