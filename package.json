@@ -7,9 +7,9 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "test": "node --test test/unit.test.js test/flow.test.js test/pipeline.test.js test/infra.test.js test/revision.test.js",
+    "test": "node --test test/unit.test.js test/flow.test.js test/pipeline.test.js test/infra.test.js test/revision.test.js test/aggregation-batch.test.js test/capacity-schedule.test.js",
     "check": "node scripts/check.js",
-    "test:integration": "node --test test/mongo.integration.test.js",
+    "test:integration": "node --test test/mongo.integration.test.js test/aggregation-batch.integration.test.js",
     "init": "node --env-file-if-exists=.env scripts/init-db.js",
     "node-red": "node --env-file-if-exists=.env src/services/node-red.js",
     "validator": "node --env-file-if-exists=.env src/services/validator.js",

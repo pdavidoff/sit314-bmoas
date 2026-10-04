@@ -87,7 +87,147 @@ class MongoStore {
             await session.endSession();
         }
     }
-    async reports(filter = {}) { return this.db.collection('aggregates').find(filter).sort({ window_start: 1, _id: 1 }).limit(500).toArray(); }
+    async aggregateBatch(ids, options = {}) {
+        if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100) {
+            throw new Error('invalid_aggregation_batch');
+        }
+        if (ids.some(id => typeof id !== 'string')) {
+            throw new Error('invalid_internal_reference');
+        }
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await this.aggregateBatchOnce([...new Set(ids)], options);
+            } catch (error) {
+                if (error.code !== 11000 || attempt >= 7) {
+                    throw error;
+                }
+                await new Promise(resolve => setTimeout(resolve, 5 + attempt * 10));
+            }
+        }
+    }
+
+    async aggregateBatchOnce(ids, { windowSeconds = 60, failBeforeCommit = false, shards = 1 } = {}) {
+        const session = this.client.startSession();
+        try {
+            const result = await session.withTransaction(async () => {
+                const observations = this.db.collection('observations');
+                const records = await observations.find({ _id: { $in: ids } }, { session }).toArray();
+                if (records.length !== ids.length) {
+                    throw new Error('observation_not_ready');
+                }
+                const outcomes = new Map();
+                const buckets = new Map();
+                const memberships = new Map();
+                const updates = [];
+                const now = new Date();
+                for (const record of records) {
+                    if (record.completed_at) {
+                        outcomes.set(record._id, { duplicate: true });
+                        continue;
+                    }
+                    let disposition = 'counted';
+                    let bucketId = null;
+                    if (record.late) {
+                        disposition = 'late_review';
+                    } else if (record.event.media_source_id === null) {
+                        disposition = 'no_media';
+                    } else {
+                        const bucket = bucketFor(record, windowSeconds);
+                        bucketId = bucket._id;
+                        if (!Number.isSafeInteger(shards) || shards < 1 || shards > 256) {
+                            throw new Error('invalid_aggregation_shards');
+                        }
+                        let storageId = bucketId;
+                        if (shards > 1) {
+                            const shard = parseInt(hash(record.event.panel_id).slice(0, 8), 16) % shards;
+                            storageId = hash([bucketId, shard]);
+                            bucket.logical_bucket_id = bucketId;
+                            bucket.shard = shard;
+                            bucket._id = storageId;
+                        }
+                        if (!buckets.has(storageId)) {
+                            buckets.set(storageId, { bucket, expiresAt: record.expires_at, observations: 0, participants: 0 });
+                        }
+                        buckets.get(storageId).observations++;
+                        const membershipId = hash([bucketId, record.event.panel_id]);
+                        if (!memberships.has(membershipId)) {
+                            memberships.set(membershipId, { bucketId, storageId, panelId: record.event.panel_id, expiresAt: record.expires_at });
+                        }
+                    }
+                    updates.push({ updateOne: {
+                        filter: { _id: record._id },
+                        update: { $set: { completed_at: now, disposition, bucket_id: bucketId, latency_ms: now - record.published_at } }
+                    } });
+                    outcomes.set(record._id, { duplicate: false, disposition });
+                }
+                // One membership write per distinct person and bucket in this batch.
+                // The transaction makes concurrent batches retry before counts can diverge.
+                const memberEntries = [...memberships.entries()];
+                if (memberEntries.length) {
+                    const writes = memberEntries.map(([id, member]) => ({ updateOne: {
+                        filter: { _id: id },
+                        update: { $setOnInsert: { bucket_id: member.bucketId, panel_id: member.panelId, expires_at: member.expiresAt } },
+                        upsert: true
+                    } }));
+                    const inserted = await this.db.collection('memberships').bulkWrite(writes, { session });
+                    for (const index of Object.keys(inserted.upsertedIds)) {
+                        const member = memberEntries[Number(index)][1];
+                        buckets.get(member.storageId).participants++;
+                    }
+                }
+                if (buckets.size) {
+                    const writes = [...buckets.values()].map(group => ({ updateOne: {
+                        filter: { _id: group.bucket._id },
+                        update: {
+                            $setOnInsert: { ...group.bucket, expires_at: group.expiresAt },
+                            $inc: { observation_count: group.observations, participant_count: group.participants },
+                            $set: { updated_at: now }
+                        },
+                        upsert: true
+                    } }));
+                    await this.db.collection('aggregates').bulkWrite(writes, { session });
+                }
+                if (updates.length) {
+                    await observations.bulkWrite(updates, { session });
+                }
+                if (failBeforeCommit) {
+                    throw new Error('injected_transaction_failure');
+                }
+                return outcomes;
+            }, { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' }, maxCommitTimeMS: 10000 });
+            // Confirmation is written only after the whole transaction commits.
+            // Redelivery repairs an interrupted confirmation without increasing ratings.
+            const confirmed = new Date();
+            await this.db.collection('observations').updateMany(
+                { _id: { $in: ids }, confirmed_at: { $exists: false } },
+                [{ $set: { confirmed_at: confirmed, processing_latency_ms: { $subtract: [confirmed, '$published_at'] } } }]
+            );
+            return result;
+        } finally {
+            await session.endSession();
+        }
+    }
+    async reportRows(filter = {}, limit = 0) {
+        const pipeline = [
+            { $match: filter },
+            { $group: {
+                _id: { $ifNull: ['$logical_bucket_id', '$_id'] },
+                record: { $first: '$$ROOT' },
+                observation_count: { $sum: '$observation_count' },
+                participant_count: { $sum: '$participant_count' },
+                updated_at: { $max: '$updated_at' }
+            } },
+            { $replaceRoot: { newRoot: { $mergeObjects: ['$record', {
+                _id: '$_id', observation_count: '$observation_count',
+                participant_count: '$participant_count', updated_at: '$updated_at'
+            }] } } },
+            { $unset: ['logical_bucket_id', 'shard'] },
+            { $sort: { window_start: 1, _id: 1 } }
+        ];
+        if (limit > 0) pipeline.push({ $limit: limit });
+        return this.db.collection('aggregates').aggregate(pipeline).toArray();
+    }
+    async reports(filter = {}) { return this.reportRows(filter, 500); }
     async runSummary(runId) {
         const c = this.db.collection('observations');
         const filter = { run_id: runId };

@@ -69,6 +69,10 @@ The original design scaled aggregation using a CPU target. The revision reduces 
 
 See [changes](docs/CHANGES.md) and [evaluation](docs/EVALUATION.md). Comparisons use the original and revised application on the same database tier. Fixed-capacity trials separate software changes from the extra capacity available when all processing stages scale. Stepped and reconnect trials measure throughput, p95 latency, queue recovery, errors and resource use.
 
+## Further latency improvements
+
+Aggregation now batches transactions and partitions each logical ratings bucket across 64 participant groups. Reporting merges those groups into the original API response. Optional scheduled capacity can prepare all three stages before anticipated demand. Final cloud trials measured p95 of 226 ms at 100/s and 288 ms at 1,000/s over 120 seconds. Reconnect completed 62,000 observations with exact ratings. See [successive changes and measured limits](docs/LATENCY_REVISION.md). The original 900 second trial is retained as an earlier unsuccessful attempt.
+
 ## Repository guide
 
 | Location | Purpose |

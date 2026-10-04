@@ -2,14 +2,15 @@
 const { MongoStore } = require('../store');
 const { getQueue } = require('../queue/sqs');
 const { consume } = require('../queue/consume');
-const { aggregatorHandler } = require('../handlers');
+const { batchedAggregatorHandler } = require('../aggregation-batch');
 const { Metrics, error, log } = require('../telemetry');
 const { integer } = require('../config');
 async function main() {
     const store = await MongoStore.open(), queue = getQueue(), metrics = new Metrics('aggregator');
-    const worker = consume(queue, 'aggregate', aggregatorHandler(store, metrics, { windowSeconds: integer('WINDOW_SECONDS', 60, 1, 3600) }), { parallel: integer('POLLERS', 2, 1, 8), onError: e => { metrics.add('TransientErrors'); error(e); } });
+    const handler = batchedAggregatorHandler(store, metrics, { windowSeconds: integer('WINDOW_SECONDS', 60, 1, 3600), shards: integer('AGGREGATE_SHARDS', 64, 1, 256) });
+    const worker = consume(queue, 'aggregate', handler, { parallel: integer('POLLERS', 2, 1, 8), onError: e => { metrics.add('TransientErrors'); error(e); } });
     log('ready', { service: 'aggregator' });
-    async function close() { await worker.stop(); metrics.close(); await store.close(); await queue.close(); process.exit(0); }
+    async function close() { await worker.stop(); await handler.close(); metrics.close(); await store.close(); await queue.close(); process.exit(0); }
     process.once('SIGINT', close);
     process.once('SIGTERM', close);
 }

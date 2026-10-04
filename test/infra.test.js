@@ -18,7 +18,7 @@ test('each queue has a TLS policy with exactly one matching queue resource', () 
     }
     assert.deepEqual([...covered].sort(), queues.sort());
 });
-test('approved scaling range and CPU policy are preserved', () => { const t = s.Resources.AggregationTarget.Properties, p = s.Resources.CpuPolicy.Properties.TargetTrackingScalingPolicyConfiguration; assert.equal(t.MinCapacity, 1); assert.equal(t.MaxCapacity, 4); assert.equal(p.TargetValue, 60); assert.equal(p.ScaleOutCooldown, 60); assert.equal(p.ScaleInCooldown, 180); assert.equal(p.PredefinedMetricSpecification.PredefinedMetricType, 'ECSServiceAverageCPUUtilization'); });
+test('approved scaling range and CPU policy are preserved', () => { const t = s.Resources.AggregationTarget.Properties, p = s.Resources.CpuPolicy.Properties.TargetTrackingScalingPolicyConfiguration; assert.equal(s.Parameters[t.MinCapacity.Ref].Default, 1); assert.equal(s.Parameters[t.MinCapacity.Ref].MaxValue, 4); assert.equal(t.MaxCapacity, 4); assert.equal(p.TargetValue, 60); assert.equal(p.ScaleOutCooldown, 60); assert.equal(p.ScaleInCooldown, 180); assert.equal(p.PredefinedMetricSpecification.PredefinedMetricType, 'ECSServiceAverageCPUUtilization'); });
 test('ECS services have no public IP', () => { for (const r of Object.values(s.Resources))
     if (r.Type === 'AWS::ECS::Service')
         assert.equal(r.Properties.NetworkConfiguration.AwsvpcConfiguration.AssignPublicIp, 'DISABLED'); });

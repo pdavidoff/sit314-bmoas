@@ -1,8 +1,13 @@
 {
-  "release": "0.2.0-evaluation",
-  "status": "Tutor feedback revision, matched cloud evaluation in progress",
-  "local_automated_checks_passed": 55,
-  "cloud_smoke_completed": 200,
-  "cloud_smoke_p95_ms": 210,
-  "comparison_results": "See docs/EVALUATION.md. Evaluation is ongoing."
+  "release": "0.3.0-partitioned",
+  "status": "Final cloud target evaluation complete",
+  "unit_tests_passed": 58,
+  "mongo_integration_tests_passed": 2,
+  "baseline_p95_ms": 226,
+  "higher_load_p95_ms": 288,
+  "higher_load_duration_seconds": 120,
+  "reconnect_p95_ms": 506,
+  "reconnect_confirmation_recovery_seconds": 0.149,
+  "exact_ids_and_ratings": true,
+  "details": "docs/LATENCY_REVISION.md"
 }

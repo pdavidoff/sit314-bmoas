@@ -1,0 +1,50 @@
+[
+  {
+    "run_id": "partitioned-baseline-r1",
+    "configured_unique": 60000,
+    "completed_unique": 60000,
+    "p95_processing_ms": 226,
+    "measured_broker_ack_rate_per_second": 99.99483361711049,
+    "completion_rate_first_publish_to_last_confirmation_per_second": 99.97617232462012,
+    "last_confirmation_seconds_after_final_publication": 0.1230001449584961,
+    "first_sample_complete_and_all_processing_queues_empty_seconds_after_final_publication": 31.53700017929077,
+    "peak_queue_visible_plus_inflight": {
+      "raw": 15,
+      "checked": 13,
+      "aggregate": 12
+    },
+    "exact_ratings_match": true
+  },
+  {
+    "run_id": "partitioned-scale-r1",
+    "configured_unique": 120000,
+    "completed_unique": 120000,
+    "p95_processing_ms": 288,
+    "measured_broker_ack_rate_per_second": 999.8083700465162,
+    "completion_rate_first_publish_to_last_confirmation_per_second": 998.0454931321708,
+    "last_confirmation_seconds_after_final_publication": 0.21500015258789062,
+    "first_sample_complete_and_all_processing_queues_empty_seconds_after_final_publication": 30.786999940872192,
+    "peak_queue_visible_plus_inflight": {
+      "raw": 72,
+      "checked": 100,
+      "aggregate": 95
+    },
+    "exact_ratings_match": true
+  },
+  {
+    "run_id": "partitioned-reconnect-r1",
+    "configured_unique": 62000,
+    "completed_unique": 62000,
+    "p95_processing_ms": 506,
+    "measured_broker_ack_rate_per_second": 516.5848738317383,
+    "completion_rate_first_publish_to_last_confirmation_per_second": 528.0775430055937,
+    "last_confirmation_seconds_after_final_publication": 0.14899992942810059,
+    "first_sample_complete_and_all_processing_queues_empty_seconds_after_final_publication": 28.316999912261963,
+    "peak_queue_visible_plus_inflight": {
+      "raw": 166,
+      "checked": 199,
+      "aggregate": 275
+    },
+    "exact_ratings_match": true
+  }
+]

@@ -115,7 +115,7 @@ test('all processing stages have bounded scaling and one-period scale-out alarms
     const r = services.Resources;
     for (const [stage, target, queue] of [['NodeRed', 'NodeRedTarget', 'Raw'], ['Validator', 'ValidatorTarget', 'Checked'], ['Aggregator', 'AggregationTarget', 'Aggregate']]) {
         assert.equal(r[target].Properties.MaxCapacity, 4);
-        assert.equal(r[target].Properties.MinCapacity, 1);
+        assert.equal(services.Parameters[r[target].Properties.MinCapacity.Ref].Default, 1);
         for (const kind of ['Cpu', 'Depth', 'Age']) {
             const alarm = r[stage + kind + 'Alarm'];
             assert.equal(alarm.Condition, 'Responsive');

@@ -87,7 +87,7 @@ async function main() {
                     made++;
                 }
             }
-            const eligible = new Set(ids.filter(id => now - (lastSent.get(id) || 0) >= 20 && (perGateway.get(id) || 0) < 32));
+            const eligible = new Set(ids.filter(id => now - (lastSent.get(id) || 0) >= 12 && (perGateway.get(id) || 0) < 32));
             const used = new Set();
             for (const e of spool.pending.values()) {
                 if (!eligible.size || used.size === eligible.size)

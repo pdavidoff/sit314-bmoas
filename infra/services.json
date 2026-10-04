@@ -61,6 +61,88 @@
    "Default": 30,
    "MinValue": 1,
    "Description": "Oldest visible message age in seconds before urgent scale-out."
+  },
+  "NodeRedCpu": {
+   "Type": "String",
+   "Default": "512",
+   "AllowedValues": [
+    "512",
+    "1024"
+   ]
+  },
+  "NodeRedMemory": {
+   "Type": "String",
+   "Default": "1024",
+   "AllowedValues": [
+    "1024",
+    "2048"
+   ]
+  },
+  "ValidatorCpu": {
+   "Type": "String",
+   "Default": "512",
+   "AllowedValues": [
+    "512",
+    "1024"
+   ]
+  },
+  "ValidatorMemory": {
+   "Type": "String",
+   "Default": "1024",
+   "AllowedValues": [
+    "1024",
+    "2048"
+   ]
+  },
+  "NodeRedMinimumTasks": {
+   "Type": "Number",
+   "Default": 1,
+   "MinValue": 1,
+   "MaxValue": 4,
+   "Description": "Capacity available before demand. Report separately from reactive scaling."
+  },
+  "ValidatorMinimumTasks": {
+   "Type": "Number",
+   "Default": 1,
+   "MinValue": 1,
+   "MaxValue": 4,
+   "Description": "Capacity available before demand. Report separately from reactive scaling."
+  },
+  "AggregatorMinimumTasks": {
+   "Type": "Number",
+   "Default": 1,
+   "MinValue": 1,
+   "MaxValue": 4,
+   "Description": "Capacity available before demand. Report separately from reactive scaling."
+  },
+  "ScheduledCapacity": {
+   "Type": "String",
+   "Default": "false",
+   "AllowedValues": [
+    "true",
+    "false"
+   ],
+   "Description": "Enable illustrative audience-based capacity timetable. Review schedules against actual ratings and programme times."
+  },
+  "CapacityTimezone": {
+   "Type": "String",
+   "Default": "Australia/Sydney"
+  },
+  "MorningCapacitySchedule": {
+   "Type": "String",
+   "Default": "cron(45 5 * * ? *)"
+  },
+  "DaytimeCapacitySchedule": {
+   "Type": "String",
+   "Default": "cron(0 10 * * ? *)"
+  },
+  "EveningCapacitySchedule": {
+   "Type": "String",
+   "Default": "cron(45 17 * * ? *)"
+  },
+  "OvernightCapacitySchedule": {
+   "Type": "String",
+   "Default": "cron(0 23 * * ? *)"
   }
  },
  "Resources": {
@@ -232,8 +314,12 @@
     "Family": {
      "Fn::Sub": "${FoundationStack}-nodered"
     },
-    "Cpu": "512",
-    "Memory": "1024",
+    "Cpu": {
+     "Ref": "NodeRedCpu"
+    },
+    "Memory": {
+     "Ref": "NodeRedMemory"
+    },
     "RequiresCompatibilities": [
      "FARGATE"
     ],
@@ -354,7 +440,9 @@
     "TaskDefinition": {
      "Ref": "NodeRedTask"
     },
-    "DesiredCount": 1,
+    "DesiredCount": {
+     "Ref": "NodeRedMinimumTasks"
+    },
     "LaunchType": "FARGATE",
     "EnableExecuteCommand": true,
     "DeploymentConfiguration": {
@@ -568,8 +656,12 @@
     "Family": {
      "Fn::Sub": "${FoundationStack}-validator"
     },
-    "Cpu": "512",
-    "Memory": "1024",
+    "Cpu": {
+     "Ref": "ValidatorCpu"
+    },
+    "Memory": {
+     "Ref": "ValidatorMemory"
+    },
     "RequiresCompatibilities": [
      "FARGATE"
     ],
@@ -697,7 +789,9 @@
     "TaskDefinition": {
      "Ref": "ValidatorTask"
     },
-    "DesiredCount": 1,
+    "DesiredCount": {
+     "Ref": "ValidatorMinimumTasks"
+    },
     "LaunchType": "FARGATE",
     "EnableExecuteCommand": true,
     "DeploymentConfiguration": {
@@ -1012,7 +1106,9 @@
     "TaskDefinition": {
      "Ref": "AggregatorTask"
     },
-    "DesiredCount": 1,
+    "DesiredCount": {
+     "Ref": "AggregatorMinimumTasks"
+    },
     "LaunchType": "FARGATE",
     "EnableExecuteCommand": true,
     "DeploymentConfiguration": {
@@ -1349,7 +1445,9 @@
    "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
    "Properties": {
     "MaxCapacity": 4,
-    "MinCapacity": 1,
+    "MinCapacity": {
+     "Ref": "AggregatorMinimumTasks"
+    },
     "ResourceId": {
      "Fn::Join": [
       "",
@@ -1371,7 +1469,69 @@
      ]
     },
     "ScalableDimension": "ecs:service:DesiredCount",
-    "ServiceNamespace": "ecs"
+    "ServiceNamespace": "ecs",
+    "ScheduledActions": {
+     "Fn::If": [
+      "AudienceSchedule",
+      [
+       {
+        "ScheduledActionName": "audience-morning-news",
+        "Schedule": {
+         "Ref": "MorningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-daytime",
+        "Schedule": {
+         "Ref": "DaytimeCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 2,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-evening-news-sport",
+        "Schedule": {
+         "Ref": "EveningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-overnight",
+        "Schedule": {
+         "Ref": "OvernightCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 1,
+         "MaxCapacity": 4
+        }
+       }
+      ],
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    }
    }
   },
   "CpuPolicy": {
@@ -1396,7 +1556,9 @@
    "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
    "Properties": {
     "MaxCapacity": 4,
-    "MinCapacity": 1,
+    "MinCapacity": {
+     "Ref": "NodeRedMinimumTasks"
+    },
     "ResourceId": {
      "Fn::Join": [
       "",
@@ -1418,7 +1580,69 @@
      ]
     },
     "ScalableDimension": "ecs:service:DesiredCount",
-    "ServiceNamespace": "ecs"
+    "ServiceNamespace": "ecs",
+    "ScheduledActions": {
+     "Fn::If": [
+      "AudienceSchedule",
+      [
+       {
+        "ScheduledActionName": "audience-morning-news",
+        "Schedule": {
+         "Ref": "MorningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-daytime",
+        "Schedule": {
+         "Ref": "DaytimeCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 2,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-evening-news-sport",
+        "Schedule": {
+         "Ref": "EveningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-overnight",
+        "Schedule": {
+         "Ref": "OvernightCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 1,
+         "MaxCapacity": 4
+        }
+       }
+      ],
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    }
    },
    "Condition": "Responsive"
   },
@@ -1618,7 +1842,9 @@
    "Type": "AWS::ApplicationAutoScaling::ScalableTarget",
    "Properties": {
     "MaxCapacity": 4,
-    "MinCapacity": 1,
+    "MinCapacity": {
+     "Ref": "ValidatorMinimumTasks"
+    },
     "ResourceId": {
      "Fn::Join": [
       "",
@@ -1640,7 +1866,69 @@
      ]
     },
     "ScalableDimension": "ecs:service:DesiredCount",
-    "ServiceNamespace": "ecs"
+    "ServiceNamespace": "ecs",
+    "ScheduledActions": {
+     "Fn::If": [
+      "AudienceSchedule",
+      [
+       {
+        "ScheduledActionName": "audience-morning-news",
+        "Schedule": {
+         "Ref": "MorningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-daytime",
+        "Schedule": {
+         "Ref": "DaytimeCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 2,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-evening-news-sport",
+        "Schedule": {
+         "Ref": "EveningCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 4,
+         "MaxCapacity": 4
+        }
+       },
+       {
+        "ScheduledActionName": "audience-overnight",
+        "Schedule": {
+         "Ref": "OvernightCapacitySchedule"
+        },
+        "Timezone": {
+         "Ref": "CapacityTimezone"
+        },
+        "ScalableTargetAction": {
+         "MinCapacity": 1,
+         "MaxCapacity": 4
+        }
+       }
+      ],
+      {
+       "Ref": "AWS::NoValue"
+      }
+     ]
+    }
    },
    "Condition": "Responsive"
   },
@@ -2067,6 +2355,14 @@
    "Fn::Equals": [
     {
      "Ref": "ResponsiveScaling"
+    },
+    "true"
+   ]
+  },
+  "AudienceSchedule": {
+   "Fn::Equals": [
+    {
+     "Ref": "ScheduledCapacity"
     },
     "true"
    ]
